@@ -1,0 +1,323 @@
+# =============================================================================
+#  SECURE-COMMIT — POLICY RULEBOOK
+#  Single Source of Truth for all security rules.
+#  Standards: CIS Benchmarks | OWASP Top 10 | AWS Well-Architected Framework
+# =============================================================================
+
+version: "1.0"
+
+# ─── Global Settings ─────────────────────────────────────────────────────────
+settings:
+  history_scan_depth: 50       # Number of past commits to scan for secrets
+  strict_mode: false           # true = MEDIUM severity also blocks commits
+
+# ─── Framework References ────────────────────────────────────────────────────
+metadata:
+  framework_references:
+    - "CIS Docker Benchmark v1.6"
+    - "OWASP Top 10 2021"
+    - "AWS Well-Architected Framework Security Pillar 2023"
+
+
+# =============================================================================
+#  DOCKER POLICIES  (applies to files named "Dockerfile")
+#  Source: CIS Docker Benchmark v1.6
+# =============================================================================
+docker_policies:
+
+  - id: "DOCK-001"
+    name: "Container Must Not Run As Root"
+    severity: "CRITICAL"
+    standard: "CIS Docker Benchmark 4.1"
+    description: >
+      Running containers as root gives an attacker full control of the host
+      system if the container is compromised. Always specify a non-root USER.
+    check_type: "key_value_match"
+    key: "USER"
+    forbidden_value: "root"
+    fix: "Add 'USER appuser' before the CMD/ENTRYPOINT instruction."
+
+  - id: "DOCK-002"
+    name: "SSH Port (22) Must Not Be Exposed"
+    severity: "HIGH"
+    standard: "CIS Docker Benchmark 5.7"
+    description: >
+      Exposing port 22 (SSH) in a container is unnecessary and dangerous.
+      Containers should be managed via orchestration tools, not direct SSH.
+    check_type: "port_check"
+    forbidden_ports:
+      - 22    # SSH
+      - 23    # Telnet
+      - 3389  # Windows RDP
+    fix: "Remove the EXPOSE instruction for port 22, 23, or 3389."
+
+  - id: "DOCK-003"
+    name: "Docker Image Must Not Use :latest Tag"
+    severity: "MEDIUM"
+    standard: "CIS Docker Benchmark 4.8"
+    description: >
+      Using ':latest' makes builds non-deterministic. The image pulled today
+      may differ from the one pulled in production, hiding vulnerabilities.
+    check_type: "image_tag_check"
+    fix: "Pin to a specific version, e.g. 'FROM ubuntu:22.04' instead of 'FROM ubuntu:latest'."
+
+  - id: "DOCK-004"
+    name: "Dockerfile Must Include a HEALTHCHECK"
+    severity: "MEDIUM"
+    standard: "CIS Docker Benchmark 4.6"
+    description: >
+      Without a HEALTHCHECK, orchestrators (Docker Swarm, Kubernetes) cannot
+      detect when a container has failed silently and will not restart it.
+    check_type: "key_absent"
+    key: "HEALTHCHECK"
+    fix: "Add 'HEALTHCHECK CMD curl -f http://localhost/ || exit 1'"
+
+  - id: "DOCK-005"
+    name: "No Hardcoded Secrets in ENV Instructions"
+    severity: "CRITICAL"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: >
+      Secrets placed in ENV instructions are baked into the image layers and
+      visible to anyone who runs 'docker inspect' or pulls the image.
+    check_type: "env_secret_check"
+    fix: "Use Docker secrets or environment variables injected at runtime. Never hardcode in ENV."
+
+  - id: "DOCK-006"
+    name: "Do Not Use Privileged Mode"
+    severity: "CRITICAL"
+    standard: "CIS Docker Benchmark 5.4"
+    description: >
+      The --privileged flag gives the container full access to the host kernel.
+      This completely bypasses Docker's security isolation.
+    check_type: "key_value_match"
+    key: "PRIVILEGED"
+    forbidden_value: "true"
+    fix: "Remove '--privileged' flag. Use specific capabilities with --cap-add if needed."
+
+  - id: "DOCK-007"
+    name: "Avoid Storing Secrets via ADD or COPY"
+    severity: "HIGH"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: >
+      Copying .env files, private keys, or credential files into a Docker image
+      embeds them permanently into all image layers.
+    check_type: "copy_secret_check"
+    forbidden_patterns:
+      - ".env"
+      - ".pem"
+      - ".key"
+      - "id_rsa"
+      - "credentials"
+    fix: "Never copy secret files into images. Use runtime secret injection."
+
+
+# =============================================================================
+#  AWS / TERRAFORM POLICIES  (applies to .tf files)
+#  Source: AWS Well-Architected Framework + CIS AWS Foundations Benchmark
+# =============================================================================
+aws_policies:
+
+  - id: "AWS-001"
+    name: "S3 Bucket Must Not Be Public"
+    severity: "CRITICAL"
+    standard: "AWS Well-Architected SEC-1 / CIS AWS 2.1"
+    description: >
+      Public S3 buckets expose all stored data to the entire internet.
+      This is one of the most common causes of cloud data breaches.
+    check_type: "key_value_match"
+    resource_type: "aws_s3_bucket"
+    key: "acl"
+    forbidden_values:
+      - "public-read"
+      - "public-read-write"
+      - "authenticated-read"
+    fix: "Set 'acl = \"private\"' on all S3 bucket resources."
+
+  - id: "AWS-002"
+    name: "SSH Must Not Be Open to the Internet"
+    severity: "CRITICAL"
+    standard: "AWS Well-Architected SEC-5 / CIS AWS 4.1"
+    description: >
+      A security group rule that allows port 22 (SSH) from 0.0.0.0/0
+      exposes your EC2 instances to brute-force attacks from the entire internet.
+    check_type: "cidr_check"
+    resource_type: "aws_security_group"
+    sensitive_ports:
+      - 22
+      - 3389
+    forbidden_cidr:
+      - "0.0.0.0/0"
+      - "::/0"
+    fix: "Restrict cidr_blocks to your specific IP range, e.g. '203.0.113.10/32'."
+
+  - id: "AWS-003"
+    name: "RDS Database Must Have Encryption Enabled"
+    severity: "HIGH"
+    standard: "AWS Well-Architected SEC-8 / CIS AWS 2.3"
+    description: >
+      Unencrypted RDS instances store data in plaintext. If the underlying
+      storage is accessed, all data is immediately readable.
+    check_type: "key_value_not_match"
+    resource_type: "aws_db_instance"
+    key: "storage_encrypted"
+    required_value: "true"
+    fix: "Add 'storage_encrypted = true' to your aws_db_instance resource."
+
+  - id: "AWS-004"
+    name: "S3 Bucket Must Have Versioning Enabled"
+    severity: "MEDIUM"
+    standard: "AWS Well-Architected REL-9"
+    description: >
+      Without versioning, accidental deletions or overwrites of S3 objects
+      cannot be recovered. Versioning is critical for data durability.
+    check_type: "key_absent"
+    resource_type: "aws_s3_bucket"
+    key: "versioning"
+    fix: "Add a versioning block with 'enabled = true' to your S3 bucket."
+
+  - id: "AWS-005"
+    name: "All Ports Must Not Be Open to the Internet"
+    severity: "CRITICAL"
+    standard: "AWS Well-Architected SEC-5 / CIS AWS 4.2"
+    description: >
+      A security group with port 0 (all ports) open to 0.0.0.0/0 is the
+      most dangerous misconfiguration possible — it exposes every service.
+    check_type: "cidr_check"
+    resource_type: "aws_security_group"
+    sensitive_ports:
+      - 0
+    forbidden_cidr:
+      - "0.0.0.0/0"
+      - "::/0"
+    fix: "Never use from_port=0, to_port=0 with cidr_blocks=['0.0.0.0/0']."
+
+  - id: "AWS-006"
+    name: "EBS Volume Must Have Encryption Enabled"
+    severity: "HIGH"
+    standard: "AWS Well-Architected SEC-8 / CIS AWS 2.2"
+    description: >
+      Unencrypted EBS volumes expose data at rest. AWS provides native
+      encryption with zero performance penalty.
+    check_type: "key_value_not_match"
+    resource_type: "aws_ebs_volume"
+    key: "encrypted"
+    required_value: "true"
+    fix: "Add 'encrypted = true' to your aws_ebs_volume resource."
+
+  - id: "AWS-007"
+    name: "IAM Policy Must Not Allow Wildcard Admin Actions"
+    severity: "CRITICAL"
+    standard: "AWS Well-Architected SEC-2 / CIS AWS 1.22"
+    description: >
+      An IAM policy with Action='*' and Resource='*' grants full admin access
+      to any principal — violating the Principle of Least Privilege.
+    check_type: "key_value_match"
+    resource_type: "aws_iam_policy"
+    key: "actions"
+    forbidden_value: "*"
+    fix: "Specify only the exact actions needed, e.g. ['s3:GetObject', 's3:PutObject']."
+
+  - id: "AWS-008"
+    name: "CloudTrail Must Be Enabled"
+    severity: "HIGH"
+    standard: "AWS Well-Architected SEC-4 / CIS AWS 2.1"
+    description: >
+      Without CloudTrail, there is no audit log of API calls made in your
+      AWS account. Incident investigation becomes impossible.
+    check_type: "key_value_not_match"
+    resource_type: "aws_cloudtrail"
+    key: "enable_logging"
+    required_value: "true"
+    fix: "Set 'enable_logging = true' on your aws_cloudtrail resource."
+
+
+# =============================================================================
+#  SECRET DETECTION PATTERNS  (applies to ALL file types)
+#  Source: OWASP Top 10 A02:2021, A07:2021
+# =============================================================================
+secret_patterns:
+
+  - id: "SEC-001"
+    name: "AWS Access Key ID Detected"
+    severity: "CRITICAL"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: "Hardcoded AWS Access Key IDs allow direct API access to AWS resources."
+    pattern: "AKIA[0-9A-Z]{16}"
+    fix: "Remove the key. Use IAM roles or AWS environment variables (AWS_ACCESS_KEY_ID)."
+
+  - id: "SEC-002"
+    name: "AWS Secret Access Key Detected"
+    severity: "CRITICAL"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: "Hardcoded AWS Secret Access Keys provide full programmatic AWS access."
+    pattern: "(?i)aws.{0,20}secret.{0,20}['\"][0-9a-zA-Z/+]{40}['\"]"
+    fix: "Remove the secret. Use IAM roles, AWS Secrets Manager, or environment variables."
+
+  - id: "SEC-003"
+    name: "Stripe Live Secret Key Detected"
+    severity: "CRITICAL"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: "A Stripe live secret key allows full control of payment processing."
+    pattern: "sk_live_[0-9a-zA-Z]{24,}"
+    fix: "Rotate the key immediately at dashboard.stripe.com. Use environment variables."
+
+  - id: "SEC-004"
+    name: "GitHub Personal Access Token Detected"
+    severity: "CRITICAL"
+    standard: "OWASP A07:2021 — Identification and Authentication Failures"
+    description: "A GitHub PAT can be used to access and modify repositories."
+    pattern: "ghp_[A-Za-z0-9]{36}"
+    fix: "Revoke the token at github.com/settings/tokens. Use GitHub Actions secrets."
+
+  - id: "SEC-005"
+    name: "Generic API Key Detected"
+    severity: "HIGH"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: "A variable named api_key/apikey/api-key contains a long token value."
+    pattern: "(?i)(api[_\\-]?key|apikey)\\s*[:=]\\s*['\"]?[A-Za-z0-9\\-_]{20,}['\"]?"
+    fix: "Move API keys to environment variables or a secrets manager."
+
+  - id: "SEC-006"
+    name: "Hardcoded Password Detected"
+    severity: "HIGH"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: "A variable named password/passwd/pwd contains a literal string value."
+    pattern: "(?i)(password|passwd|pwd)\\s*[:=]\\s*['\"]?[^\\s'\"]{8,}['\"]?"
+    fix: "Use environment variables or a secrets manager. Never hardcode passwords."
+
+  - id: "SEC-007"
+    name: "Private Key Header Detected"
+    severity: "CRITICAL"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: "A private key file (RSA, EC, OpenSSH) is present in the codebase."
+    pattern: "-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
+    fix: "Remove the private key file immediately. Add *.pem and *.key to .gitignore."
+
+  - id: "SEC-008"
+    name: "Google Cloud API Key Detected"
+    severity: "CRITICAL"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: "A Google Cloud API key allows access to GCP services."
+    pattern: "AIza[0-9A-Za-z\\-_]{35}"
+    fix: "Revoke the key in GCP Console. Use service account credentials instead."
+
+  - id: "SEC-009"
+    name: "Slack API Token Detected"
+    severity: "HIGH"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: "A Slack token allows reading and posting to Slack workspaces."
+    pattern: "xox[baprs]-[0-9A-Za-z]{10,48}"
+    fix: "Revoke at api.slack.com/apps. Store tokens in environment variables."
+
+  - id: "SEC-010"
+    name: "High-Entropy String Detected"
+    severity: "MEDIUM"
+    standard: "OWASP A02:2021 — Cryptographic Failures"
+    description: >
+      A string with Shannon entropy > 4.5 bits/char and length > 20 characters
+      was found assigned to a suspicious variable name. This may be an
+      unrecognized secret format.
+    check_type: "entropy"
+    entropy_threshold: 4.5
+    min_length: 20
+    fix: "If this is a secret, move it to an environment variable or secrets manager."

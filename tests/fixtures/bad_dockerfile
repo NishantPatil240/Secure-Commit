@@ -1,0 +1,6 @@
+FROM ubuntu:latest
+USER root
+EXPOSE 22 80
+ENV SECRET_KEY=abc123supersecretvalue
+ENV DB_PASSWORD=SuperSecret@123
+ADD .env /app/.env
