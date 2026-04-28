@@ -30,3 +30,7 @@ resource "aws_cloudtrail" "good_trail" {
   name          = "main-trail"
   enable_logging = true
 }
+
+
+
+

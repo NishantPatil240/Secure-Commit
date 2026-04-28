@@ -79,7 +79,7 @@ def print_banner():
     enable_windows_ansi()
     print()
     print(f"{BOLD}{BLUE}╔{LINE_DOUBLE}╗{RESET}")
-    print(f"{BOLD}{BLUE}║{RESET}{BOLD}      SECURE-COMMIT  │  GOVERNANCE ENGINE  v1.0          {BLUE}║{RESET}")
+    print(f"{BOLD}{BLUE}║{RESET}{BOLD}      SECURE-COMMIT  │  GOVERNANCE ENGINE  v1.0          {BLUE}       ║{RESET}")
     print(f"{BOLD}{BLUE}╚{LINE_DOUBLE}╝{RESET}")
     print()
 
