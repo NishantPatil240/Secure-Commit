@@ -73,3 +73,6 @@ resource "aws_instance" "terra_instance" {
     Name = each.key
   }
 }
+
+
+

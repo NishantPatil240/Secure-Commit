@@ -276,6 +276,23 @@ sys.exit(result.returncode)
     if not IS_WINDOWS:
         HOOK_DEST.chmod(0o755)
         ok("Hook file made executable (chmod +x)")
+    else:
+        # On Windows, Git does not process the #!/usr/bin/env shebang.
+        # We write a companion .cmd file that Git Bash picks up automatically.
+        # Git checks for pre-commit.cmd before pre-commit on Windows.
+        cmd_dest = GIT_HOOKS_DIR / "pre-commit.cmd"
+        # Use forward slashes inside the .cmd for Git Bash compatibility
+        venv_py_cmd  = str(VENV_PYTHON).replace("/", "\\")
+        hook_src_cmd = str(HOOK_SOURCE).replace("/", "\\")
+        git_root_cmd = str(TARGET_GIT_ROOT).replace("/", "\\")
+        cmd_content = (
+            f"@echo off\r\n"
+            f"set SECURE_COMMIT_GIT_ROOT={git_root_cmd}\r\n"
+            f"cd /d \"{git_root_cmd}\"\r\n"
+            f"\"{venv_py_cmd}\" \"{hook_src_cmd}\" %*\r\n"
+        )
+        cmd_dest.write_text(cmd_content, encoding="utf-8")
+        ok(f"Windows .cmd shim installed: {cmd_dest}")
 
     ok(f"Hook installed: {HOOK_DEST}")
 

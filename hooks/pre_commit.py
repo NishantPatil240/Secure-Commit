@@ -21,6 +21,7 @@ Exit codes:
 """
 
 import sys
+import os
 import subprocess
 from pathlib import Path
 
@@ -29,6 +30,13 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+# ── Real Git root of the protected project ────────────────────────────────────
+# When Secure-Commit is installed as a subfolder inside a larger project,
+# _PROJECT_ROOT (Secure-Commit's own folder) differs from _GIT_ROOT (the
+# developer's actual repo). The hook sets SECURE_COMMIT_GIT_ROOT so we know.
+# Falls back to _PROJECT_ROOT when Secure-Commit IS the top-level project.
+_GIT_ROOT = Path(os.environ.get("SECURE_COMMIT_GIT_ROOT", str(_PROJECT_ROOT)))
 
 # ── Engine imports ─────────────────────────────────────────────────────────────
 try:
@@ -63,7 +71,7 @@ def main():
 
     # ── Step 1: Open the Git repository ───────────────────────────────────
     try:
-        repo = git.Repo(_PROJECT_ROOT, search_parent_directories=True)
+        repo = git.Repo(_GIT_ROOT, search_parent_directories=True)
     except git.InvalidGitRepositoryError:
         reporter.print_error("Not inside a Git repository.")
         return 1
@@ -97,7 +105,7 @@ def main():
     iac_findings = []
 
     for file_str in staged_files:
-        file_path = _PROJECT_ROOT / file_str
+        file_path = _GIT_ROOT / file_str
 
         parsed = parse_file(file_path)
         if parsed is None:
@@ -114,7 +122,7 @@ def main():
     # read staged files directly from disk and scan their text content
     if not staged_secret_findings:
         for file_str in staged_files:
-            file_path = _PROJECT_ROOT / file_str
+            file_path = _GIT_ROOT / file_str
             if not file_path.exists():
                 continue
             try:
@@ -169,7 +177,7 @@ def _get_staged_files():
             ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
             capture_output=True,
             text=True,
-            cwd=str(_PROJECT_ROOT),
+            cwd=str(_GIT_ROOT),
         )
         if result.returncode != 0:
             return []

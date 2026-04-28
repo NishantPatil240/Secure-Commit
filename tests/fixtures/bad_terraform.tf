@@ -33,3 +33,6 @@ resource "aws_iam_policy" "bad_policy" {
     resources = "*"
   })
 }
+
+
+
