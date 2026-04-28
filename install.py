@@ -88,17 +88,51 @@ def check_python_version():
 
 def find_target_git_root():
     """
-    Use 'git rev-parse --show-toplevel' to find the real root of the Git
-    repository — even if install.py is running from inside a subfolder.
+    Find the real Git repo root to install the hook into.
 
-    Examples:
-      - If run from: /home/user/my-app/secure-commit/
-        Returns:       /home/user/my-app          (the parent project)
-      - If run from: /home/user/secure-commit/    (standalone)
-        Returns:       /home/user/secure-commit   (itself)
+    THE PROBLEM THIS SOLVES:
+      If Secure-Commit is itself a cloned Git repo (has its own .git/),
+      running 'git rev-parse --show-toplevel' from inside it will stop at
+      Secure-Commit's own .git/ and never find the parent project's .git/.
+
+      Example (WRONG without this fix):
+        simple-java-docker/          ← real project (.git/ here)
+        └── Secure-Commit/           ← also a git repo (.git/ here)
+            └── install.py
+
+      git rev-parse from Secure-Commit/ → returns Secure-Commit/ (WRONG)
+      git rev-parse from simple-java-docker/ → returns simple-java-docker/ (CORRECT)
+
+    THE FIX:
+      First try git rev-parse from the PARENT directory of install.py.
+      If the parent is a Git repo, that is our target.
+      Only if the parent is NOT a Git repo do we fall back to PROJECT_ROOT.
     """
     global TARGET_GIT_ROOT, GIT_HOOKS_DIR, HOOK_DEST
 
+    # ── Step 1: Try the parent folder first ───────────────────────────────────
+    # This handles the case where Secure-Commit is a cloned subfolder with its
+    # own .git/ inside a larger project that also has a .git/.
+    parent_dir = PROJECT_ROOT.parent
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        cwd=str(parent_dir),
+    )
+
+    if result.returncode == 0:
+        candidate = Path(result.stdout.strip())
+        # Only use the parent's git root if it is actually OUTSIDE our folder.
+        # This avoids an edge case where parent_dir itself is not in any repo.
+        if candidate != PROJECT_ROOT:
+            TARGET_GIT_ROOT = candidate
+            info(f"Detected subfolder install. Target project: {TARGET_GIT_ROOT}")
+            _set_hook_paths()
+            ok(f"Target Git root confirmed: {TARGET_GIT_ROOT}")
+            return
+
+    # ── Step 2: Fall back — Secure-Commit IS the top-level project ────────────
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
@@ -107,18 +141,21 @@ def find_target_git_root():
     )
 
     if result.returncode != 0:
-        err("Not inside a Git repository. Run this installer from a folder that is\n"
-            "  tracked by Git, or from inside a project that contains a .git/ folder.")
+        err("Not inside a Git repository. Run this installer from inside a Git\n"
+            "  repository, or from a folder inside a project that has a .git/ folder.")
         sys.exit(1)
 
     TARGET_GIT_ROOT = Path(result.stdout.strip())
-    GIT_HOOKS_DIR   = TARGET_GIT_ROOT / ".git" / "hooks"
-    HOOK_DEST       = GIT_HOOKS_DIR / "pre-commit"   # No .py — Git requirement
-
-    if TARGET_GIT_ROOT != PROJECT_ROOT:
-        info(f"Detected subfolder install. Target project: {TARGET_GIT_ROOT}")
-
+    _set_hook_paths()
     ok(f"Target Git root confirmed: {TARGET_GIT_ROOT}")
+
+
+def _set_hook_paths():
+    """Set GIT_HOOKS_DIR and HOOK_DEST once TARGET_GIT_ROOT is known."""
+    global GIT_HOOKS_DIR, HOOK_DEST
+    GIT_HOOKS_DIR = TARGET_GIT_ROOT / ".git" / "hooks"
+    HOOK_DEST     = GIT_HOOKS_DIR / "pre-commit"   # No .py — Git requirement
+
 
 
 def check_git_hooks_dir():
