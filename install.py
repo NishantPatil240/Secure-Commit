@@ -6,8 +6,12 @@ One-time setup script. Run this once to wire Secure-Commit into your
 Git repository as a pre-commit hook.
 
 Usage:
-    python install.py              # install the hook
-    python install.py --uninstall  # remove the hook
+    Windows:
+        python install.py              # install the hook
+        python install.py --uninstall  # remove the hook
+    Linux / macOS:
+        python3 install.py
+        python3 install.py --uninstall
 
 Tested on: Windows 10/11 (Git Bash), macOS, Ubuntu Linux.
 """
@@ -28,12 +32,21 @@ if hasattr(sys.stdout, "reconfigure"):
 #  PATHS
 # ─────────────────────────────────────────────────────────────────────────────
 
-PROJECT_ROOT   = Path(__file__).resolve().parent
-VENV_DIR       = PROJECT_ROOT / ".venv"
-REQUIREMENTS   = PROJECT_ROOT / "requirements.txt"
-HOOK_SOURCE    = PROJECT_ROOT / "hooks" / "pre_commit.py"
-GIT_HOOKS_DIR  = PROJECT_ROOT / ".git" / "hooks"
-HOOK_DEST      = GIT_HOOKS_DIR / "pre-commit"   # No .py — Git requirement
+# ── Framework root: where install.py (and engine/, hooks/, etc.) live ──────────
+# This is always the secure-commit folder itself.
+PROJECT_ROOT  = Path(__file__).resolve().parent
+VENV_DIR      = PROJECT_ROOT / ".venv"
+REQUIREMENTS  = PROJECT_ROOT / "requirements.txt"
+HOOK_SOURCE   = PROJECT_ROOT / "hooks" / "pre_commit.py"
+
+# ── Target Git root: discovered at runtime via git rev-parse ─────────────────
+# This is the TOP-LEVEL project that the developer is actually working in.
+# If secure-commit is cloned as a subfolder (e.g. my-app/secure-commit/),
+# TARGET_GIT_ROOT resolves to my-app/ — the correct place for .git/hooks/.
+# If secure-commit IS the top-level project, this equals PROJECT_ROOT.
+TARGET_GIT_ROOT = None   # set by find_target_git_root() at runtime
+GIT_HOOKS_DIR   = None   # set after TARGET_GIT_ROOT is known
+HOOK_DEST       = None   # set after GIT_HOOKS_DIR is known
 
 # Platform-specific venv binary paths
 IS_WINDOWS = sys.platform == "win32"
@@ -73,21 +86,55 @@ def check_python_version():
     ok(f"Python {major}.{minor}.{sys.version_info.micro} detected")
 
 
-def check_git_hooks_dir():
-    """Ensure we are inside a Git repository with a hooks directory."""
-    if not (PROJECT_ROOT / ".git").exists():
-        err("No .git directory found. Run this installer from inside a Git repository.")
+def find_target_git_root():
+    """
+    Use 'git rev-parse --show-toplevel' to find the real root of the Git
+    repository — even if install.py is running from inside a subfolder.
+
+    Examples:
+      - If run from: /home/user/my-app/secure-commit/
+        Returns:       /home/user/my-app          (the parent project)
+      - If run from: /home/user/secure-commit/    (standalone)
+        Returns:       /home/user/secure-commit   (itself)
+    """
+    global TARGET_GIT_ROOT, GIT_HOOKS_DIR, HOOK_DEST
+
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        cwd=str(PROJECT_ROOT),
+    )
+
+    if result.returncode != 0:
+        err("Not inside a Git repository. Run this installer from a folder that is\n"
+            "  tracked by Git, or from inside a project that contains a .git/ folder.")
         sys.exit(1)
 
+    TARGET_GIT_ROOT = Path(result.stdout.strip())
+    GIT_HOOKS_DIR   = TARGET_GIT_ROOT / ".git" / "hooks"
+    HOOK_DEST       = GIT_HOOKS_DIR / "pre-commit"   # No .py — Git requirement
+
+    if TARGET_GIT_ROOT != PROJECT_ROOT:
+        info(f"Detected subfolder install. Target project: {TARGET_GIT_ROOT}")
+
+    ok(f"Target Git root confirmed: {TARGET_GIT_ROOT}")
+
+
+def check_git_hooks_dir():
+    """Create .git/hooks/ in the TARGET project if it doesn't exist."""
     GIT_HOOKS_DIR.mkdir(parents=True, exist_ok=True)
     ok(f"Git hooks directory confirmed: {GIT_HOOKS_DIR}")
 
 
 def create_virtual_environment():
     """Create .venv if it doesn't already exist."""
-    if VENV_DIR.exists():
+    if VENV_DIR.exists() and VENV_PIP.exists():
         ok(f"Virtual environment already exists: {VENV_DIR}")
         return
+    elif VENV_DIR.exists():
+        warn("Found incomplete virtual environment. Cleaning up...")
+        shutil.rmtree(VENV_DIR)
 
     info("Creating virtual environment (.venv)...")
     result = subprocess.run(
@@ -96,7 +143,8 @@ def create_virtual_environment():
         text=True,
     )
     if result.returncode != 0:
-        err(f"Failed to create virtual environment:\n{result.stderr}")
+        error_msg = result.stderr.strip() or result.stdout.strip()
+        err(f"Failed to create virtual environment:\n{error_msg}")
         sys.exit(1)
 
     ok(f"Virtual environment created: {VENV_DIR}")
@@ -151,7 +199,7 @@ def install_hook():
     project_path = str(PROJECT_ROOT).replace("\\", "/")
 
     # Write a thin wrapper script as the actual hook file
-    hook_content = f"""#!/usr/bin/env python
+    hook_content = f"""#!/usr/bin/env python3
 # Secure-Commit Pre-Commit Hook
 # Auto-generated by install.py — do not edit manually.
 # To reinstall: python install.py
@@ -203,7 +251,7 @@ def validate_installation():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def uninstall():
-    """Remove the pre-commit hook from .git/hooks/."""
+    """Remove the pre-commit hook from .git/hooks/ of the TARGET project."""
     if HOOK_DEST.exists():
         HOOK_DEST.unlink()
         ok(f"Hook removed: {HOOK_DEST}")
@@ -237,6 +285,7 @@ def main():
     print()
 
     if args.uninstall:
+        find_target_git_root()     # need TARGET_GIT_ROOT to know where HOOK_DEST is
         uninstall()
         return
 
@@ -244,6 +293,7 @@ def main():
     print()
 
     check_python_version()
+    find_target_git_root()     # ← discovers TARGET_GIT_ROOT, GIT_HOOKS_DIR, HOOK_DEST
     check_git_hooks_dir()
     create_virtual_environment()
     install_dependencies()

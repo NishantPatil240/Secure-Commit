@@ -6,12 +6,58 @@
 into your Git repository.
 
 You run it once:
-```
+
+**On Windows:**
+```cmd
 python install.py
+```
+
+**On Linux / macOS:**
+```bash
+python3 install.py
 ```
 
 After that, the hook runs automatically on every `git commit` — forever — without
 any manual commands needed.
+
+---
+
+## Two Ways To Use Secure-Commit
+
+### Option 1 — Standalone Project
+Secure-Commit IS your project root:
+```
+secure-commit/       ← your Git repo root (.git/ lives here)
+├── install.py
+├── engine/
+└── hooks/
+```
+Just run `python install.py` from here. It works exactly as expected.
+
+---
+
+### Option 2 — Cloned As A Subfolder (Recommended)
+Secure-Commit is cloned **inside** an existing project:
+```
+my-app/                      ← developer's real project (.git/ lives here)
+├── .git/
+│   └── hooks/               ← install.py correctly installs the hook HERE ✓
+├── src/                     ← developer's own code
+└── secure-commit/           ← this framework, cloned as a subfolder
+    ├── install.py
+    ├── engine/
+    └── hooks/
+```
+Run the installer from inside the `secure-commit/` subfolder:
+```bash
+cd my-app/secure-commit
+python3 install.py
+```
+The installer automatically detects that `my-app/` is the real Git root and
+installs the hook into `my-app/.git/hooks/` — not into `secure-commit/.git/hooks/`.
+
+**This is the key problem it solves:** Without this detection, the hook would be
+installed into the wrong `.git/` folder and would never run.
 
 ---
 
@@ -20,99 +66,101 @@ any manual commands needed.
 ### Step 1: Check Python Version
 Ensures Python 3.8 or higher is available.
 ```
-✓ Python 3.14.4 detected
+✓ Python 3.12.3 detected
 ```
 
-### Step 2: Create Virtual Environment
-Creates an isolated `.venv` folder inside the project:
+### Step 2: Find Target Git Root (Smart Subfolder Detection)
+Uses `git rev-parse --show-toplevel` to locate the **actual parent project's**
+`.git/` folder, even if install.py is running from inside a subfolder.
 ```
-✓ Virtual environment created at .venv\
+→ Detected subfolder install. Target project: /home/user/my-app
+✓ Target Git root confirmed: /home/user/my-app
+```
+
+Two important concepts:
+
+| Variable | What It Refers To |
+|---|---|
+| `PROJECT_ROOT` | Where `install.py` itself lives (the `secure-commit/` folder) |
+| `TARGET_GIT_ROOT` | The real project root found via `git rev-parse` |
+
+If Secure-Commit is used standalone, both variables point to the same folder.
+
+### Step 3: Create Virtual Environment
+Creates an isolated `.venv` folder **inside the `secure-commit/` folder** itself:
+```
+✓ Virtual environment created at secure-commit/.venv
 ```
 
 **What is a virtual environment?**
-A self-contained Python installation that lives inside your project folder.
+A self-contained Python installation that lives inside a folder.
 Packages installed here do NOT affect your global Python installation.
-Think of it as a private sandbox for this project.
 
 ```
-.venv/
-├── Scripts/         ← (Windows) or bin/ (Linux/Mac)
-│   ├── python.exe   ← project's own Python interpreter
-│   └── pip.exe      ← project's own pip
-└── Lib/
-    └── site-packages/
-        ├── git/     ← gitpython installed here
-        └── yaml/    ← pyyaml installed here
+secure-commit/
+└── .venv/
+    ├── Scripts/         ← (Windows) or bin/ (Linux/Mac)
+    │   ├── python.exe   ← project's own Python interpreter
+    │   └── pip.exe      ← project's own pip
+    └── Lib/
+        └── site-packages/
+            ├── git/     ← gitpython installed here
+            └── yaml/    ← pyyaml installed here
 ```
 
-### Step 3: Install Dependencies
+### Step 4: Install Dependencies
 Installs `gitpython` and `pyyaml` into the virtual environment:
 ```
-✓ Installed: gitpython==3.1.44
-✓ Installed: pyyaml==6.0.2
+✓ Dependencies installed: gitpython, pyyaml
 ```
+If a pinned version fails (e.g., on a newer Python), it automatically retries
+with the latest unpinned versions.
 
-### Step 4: Install The Git Hook
+### Step 5: Install The Git Hook
 
-Copies our main script to the Git hooks directory and sets it up:
+Writes the hook into the **target project's** hooks directory:
 
 ```
-hooks/pre_commit.py  ──copied──►  .git/hooks/pre-commit
+secure-commit/hooks/pre_commit.py  ─────►  my-app/.git/hooks/pre-commit
 ```
 
 **Critical detail:** The hook file must be named exactly `pre-commit`
-(no `.py` extension). This is a Git requirement — it looks for this exact name.
+(no `.py` extension). This is a Git requirement.
 
 **On Linux/macOS:** Also runs `chmod +x .git/hooks/pre-commit` to make it executable.
 **On Windows:** Skipped — Git Bash handles execution permissions differently.
 
-### Step 5: Validate The Installation
-Runs a dry-run check to confirm the hook is properly installed:
+### Step 6: Validate The Installation
+Confirms the hook file exists and is non-empty:
 ```
-✓ Hook installed at .git/hooks/pre-commit
-✓ Hook is executable
-✓ Installation complete — Secure-Commit is now active
+✓ Hook file validated (512 bytes)
 ```
 
 ---
 
 ## How The Hook Script Knows Where The Engine Is
 
-The hook script (`.git/hooks/pre-commit`) needs to find our engine modules
-which are in the project root — not inside `.git/hooks/`.
+The hook script (inside `my-app/.git/hooks/pre-commit`) needs to find the
+engine modules which live inside the `secure-commit/` subfolder.
 
-The installer solves this by **writing the absolute project path** into the
-top of the hook script using `sys.path.insert()`:
-
-```python
-# Written automatically by install.py
-import sys
-sys.path.insert(0, "e:/secure-commit-freamework")   # absolute path to project
-
-# Now this import works correctly
-from hooks.pre_commit import main
-main()
-```
-
-This is called **path manipulation** — telling Python where to look for modules.
-
----
-
-## How The Virtual Environment Is Activated In The Hook
-
-The hook script also needs to use the `.venv` Python (which has gitpython/pyyaml)
-instead of the system Python (which may not have them).
-
-The installer writes the path to the `.venv` Python interpreter at the top of the hook:
+The installer solves this by **baking the absolute path** to the venv Python
+and the `hooks/pre_commit.py` script directly into the hook at install time:
 
 ```python
 #!/usr/bin/env python3
-# Secure-Commit Pre-Commit Hook
-# Auto-generated by install.py — do not edit manually
+# Auto-generated by install.py
+import subprocess
+from pathlib import Path
+
+venv_python = Path(r"/home/user/my-app/secure-commit/.venv/bin/python")
+hook_script  = Path(r"/home/user/my-app/secure-commit/hooks/pre_commit.py")
+
+result = subprocess.run([str(venv_python), str(hook_script)], cwd=...)
+sys.exit(result.returncode)
 ```
 
-And uses `subprocess` to call `.venv/Scripts/python.exe` (Windows) or
-`.venv/bin/python` (Linux/Mac) explicitly.
+This means the hook always knows exactly where the engine is, regardless of
+where the developer runs `git commit` from.
 
 ---
 
@@ -120,22 +168,49 @@ And uses `subprocess` to call `.venv/Scripts/python.exe` (Windows) or
 
 | Task | Windows | Linux / macOS |
 |---|---|---|
+| Run installer | `python install.py` | `python3 install.py` |
 | Create venv | `python -m venv .venv` | `python3 -m venv .venv` |
 | pip path | `.venv\Scripts\pip.exe` | `.venv/bin/pip` |
 | Python path | `.venv\Scripts\python.exe` | `.venv/bin/python` |
+| Hook shebang | `#!/usr/bin/env python3` | `#!/usr/bin/env python3` |
 | chmod +x | ❌ Skipped | ✅ Applied |
-| Detection | `sys.platform == "win32"` | Otherwise |
+| OS detection | `sys.platform == "win32"` | Otherwise |
+
+---
+
+## Known Issues & Fixes
+
+### Linux/Ubuntu: `python3-venv` not installed
+**Error:** `Failed to create virtual environment` (blank message)
+**Fix:**
+```bash
+sudo apt update && sudo apt install python3-venv
+# or for Python 3.12 specifically:
+sudo apt install python3.12-venv
+```
+
+### Linux: `/usr/bin/env: 'python': No such file or directory`
+**Error:** Git cannot run the pre-commit hook after installation.
+**Cause:** On Linux, `python` doesn't exist — only `python3`.
+**Fix:** This is already handled. The hook uses `#!/usr/bin/env python3`.
+Just re-run `python3 install.py` to regenerate the hook.
 
 ---
 
 ## Uninstalling
 
 To remove the hook (stop Secure-Commit from running):
-```
+
+**Windows:**
+```cmd
 python install.py --uninstall
 ```
+**Linux / macOS:**
+```bash
+python3 install.py --uninstall
+```
 
-This removes `.git/hooks/pre-commit` only.
+This removes `.git/hooks/pre-commit` from the **target project** only.
 Your code, policies, and `.venv` are untouched.
 
 ---
@@ -144,10 +219,12 @@ Your code, policies, and `.venv` are untouched.
 
 | Concept | Where Used |
 |---|---|
-| `sys.platform` | Detect operating system |
-| `subprocess.run()` | Run pip install commands |
-| `shutil.copy2()` | Copy hook file to `.git/hooks/` |
-| `os.chmod()` | Set executable bit on Linux/Mac |
+| `subprocess.run()` | Run `git rev-parse`, `pip install` commands |
+| `git rev-parse --show-toplevel` | Detect the real parent project root |
+| `global` keyword | Update `TARGET_GIT_ROOT` at runtime |
 | `pathlib.Path` | All file path operations |
+| `shutil.rmtree()` | Clean up broken `.venv` directories |
+| `sys.platform` | Detect operating system |
+| `os.chmod()` | Set executable bit on Linux/Mac |
 | `sys.version_info` | Check Python version |
 | `argparse` | Handle `--uninstall` flag |
