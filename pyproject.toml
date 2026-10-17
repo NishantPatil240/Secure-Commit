@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secure-commit"
+version = "1.1.0"
+description = "Zero-Trust, Metadata-Only IaC and Secret scanning engine."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Developer", email = "developer@example.com"}
+]
+dependencies = [
+    "gitpython",
+    "pyyaml"
+]
+
+[project.scripts]
+# This line creates the global command 'secure-commit' 
+# and points it to the main() function in cli.py
+secure-commit = "cli:main"
+
+[tool.setuptools]
+# Tells the bundler to include the engine folder and cli.py
+py-modules = ["cli", "install"]
+packages = ["engine"]
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "docs*"]

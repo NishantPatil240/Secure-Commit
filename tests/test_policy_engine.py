@@ -154,3 +154,41 @@ def test_finding_description_is_non_empty():
         assert finding.get("description", "").strip(), (
             f"Finding {finding['rule_id']} has empty description"
         )
+
+def test_policy_engine_multi_ingress():
+    """Ensure policy engine evaluates all blocks in a multi-block list correctly."""
+    policies = _get_policies()
+    parsed   = parse_file(FIXTURES / "multi_ingress.tf")
+    findings = run_policy_engine(parsed, policies)
+    rule_ids = [f["rule_id"] for f in findings]
+    
+    # We expect AWS-002 (open SSH) to fire because port 22 is open in one of the ingress blocks
+    assert "AWS-002" in rule_ids, "Expected AWS-002 for port 22 in multi_ingress.tf"
+
+def test_policy_engine_nosec_suppression():
+    """Ensure # nosec comments can suppress IaC rules."""
+    # Let's mock a parsed dict with suppressions
+    policies = _get_policies()
+    parsed = {
+        "file_type": "terraform",
+        "file_path": "mock.tf",
+        "parsed_data": {
+            "resource": {
+                "aws_security_group": {
+                    "mock_sg": {
+                        "ingress": {
+                            "from_port": 22,
+                            "cidr_blocks": ["0.0.0.0/0"]
+                        }
+                    }
+                }
+            }
+        },
+        "skip_all": False,
+        "suppressed_rules": {"AWS-002"}
+    }
+    findings = run_policy_engine(parsed, policies)
+    rule_ids = [f["rule_id"] for f in findings]
+    
+    assert "AWS-002" not in rule_ids, "AWS-002 should have been suppressed"
+

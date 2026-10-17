@@ -115,3 +115,16 @@ def test_parse_good_terraform_private_acl():
     s3     = data.get("resource", {}).get("aws_s3_bucket", {})
     all_private = all(b.get("acl") == "private" for b in s3.values())
     assert all_private, "All S3 buckets in good fixture should be private"
+
+
+def test_parse_terraform_multi_ingress():
+    """Multiple ingress blocks should be parsed as a list."""
+    result = parse_file(FIXTURES / "multi_ingress.tf")
+    data   = result["parsed_data"]
+    sg     = data.get("resource", {}).get("aws_security_group", {}).get("multi_sg", {})
+    ingress = sg.get("ingress", [])
+    assert isinstance(ingress, list), "Multiple ingress blocks should be a list"
+    assert len(ingress) == 2, "Should parse exactly 2 ingress blocks"
+    ports = {i.get("from_port") for i in ingress}
+    assert 22 in ports, "Should contain port 22"
+    assert 80 in ports, "Should contain port 80"

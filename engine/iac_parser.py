@@ -56,12 +56,19 @@ def parse_file(filepath):
     path = Path(filepath)
 
     try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        from engine.utils import parse_suppressions
+        skip_all, suppressed_rules = parse_suppressions(text)
+
         if _is_dockerfile(path):
             parsed = parse_dockerfile(path)
             return {
                 "file_type":   "dockerfile",
                 "file_path":   str(path),
                 "parsed_data": parsed,
+                "skip_all":    skip_all,
+                "suppressed_rules": suppressed_rules,
             }
 
         elif path.suffix == ".tf":
@@ -70,6 +77,8 @@ def parse_file(filepath):
                 "file_type":   "terraform",
                 "file_path":   str(path),
                 "parsed_data": parsed,
+                "skip_all":    skip_all,
+                "suppressed_rules": suppressed_rules,
             }
 
         else:
@@ -259,8 +268,19 @@ def parse_terraform(filepath):
             if m and line.endswith("{"):
                 block_kw = m.group(1)
                 current = stack[-1]
-                current.setdefault(block_kw, {})
-                stack.append(current[block_kw])
+                if block_kw not in current:
+                    current[block_kw] = {}
+                    new_scope = current[block_kw]
+                else:
+                    if isinstance(current[block_kw], dict):
+                        current[block_kw] = [current[block_kw]]
+                    if isinstance(current[block_kw], list):
+                        new_scope = {}
+                        current[block_kw].append(new_scope)
+                    else:
+                        new_scope = {}
+                        current[block_kw] = new_scope
+                stack.append(new_scope)
                 labels.append((block_kw,))
                 continue
 

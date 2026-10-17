@@ -14,6 +14,7 @@ Public interface:
 
 import os
 import sys
+import json
 
 # Force UTF-8 output — required on Windows (cp1252 default breaks box chars)
 if hasattr(sys.stdout, "reconfigure"):
@@ -206,5 +207,71 @@ def print_error(message):
     print()
     print(f"  {RED}{BOLD}[FATAL ERROR]{RESET}  {message}")
     print(f"  {DIM}Secure-Commit encountered an unrecoverable error.{RESET}")
-    print(f"  {DIM}Commit blocked as a safety measure.{RESET}")
     print()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MACHINE READABLE OUTPUTS (Phase 2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def format_json(findings):
+    """
+    Format findings as a JSON string.
+    """
+    return json.dumps({"findings": findings}, indent=2)
+
+def format_sarif(findings):
+    """
+    Format findings as a SARIF 2.1.0 string for GitHub Code Scanning / CI.
+    """
+    sarif = {
+        "version": "2.1.0",
+        "$schema": "http://json.schemastore.org/sarif-2.1.0-rtm.5",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "Secure-Commit",
+                    "rules": []
+                }
+            },
+            "results": []
+        }]
+    }
+
+    rules_added = set()
+    for finding in findings:
+        rule_id = finding.get("rule_id", "UNKNOWN")
+        if rule_id not in rules_added:
+            sarif["runs"][0]["tool"]["driver"]["rules"].append({
+                "id": rule_id,
+                "name": finding.get("rule_name", ""),
+                "shortDescription": {"text": finding.get("description", "")},
+                "help": {"text": finding.get("fix", "")}
+            })
+            rules_added.add(rule_id)
+
+        sev = finding.get("severity", "").upper()
+        if sev in ("CRITICAL", "HIGH"):
+            level = "error"
+        elif sev == "MEDIUM":
+            level = "warning"
+        else:
+            level = "note"
+
+        result = {
+            "ruleId": rule_id,
+            "level": level,
+            "message": {"text": finding.get("detail", "")},
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": finding.get("file", "unknown")},
+                    "region": {
+                        "startLine": finding.get("line", 1)
+                    }
+                }
+            }]
+        }
+        sarif["runs"][0]["results"].append(result)
+
+    return json.dumps(sarif, indent=2)
+

@@ -317,10 +317,19 @@ def validate_installation():
 
 def uninstall():
     """Remove the pre-commit hook from .git/hooks/ of the TARGET project."""
+    removed_any = False
     if HOOK_DEST.exists():
         HOOK_DEST.unlink()
         ok(f"Hook removed: {HOOK_DEST}")
-    else:
+        removed_any = True
+        
+    cmd_dest = GIT_HOOKS_DIR / "pre-commit.cmd"
+    if cmd_dest.exists():
+        cmd_dest.unlink()
+        ok(f"Hook wrapper removed: {cmd_dest}")
+        removed_any = True
+
+    if not removed_any:
         warn("Hook was not installed — nothing to remove.")
 
     print()
@@ -331,6 +340,31 @@ def uninstall():
 # ─────────────────────────────────────────────────────────────────────────────
 #  MAIN
 # ─────────────────────────────────────────────────────────────────────────────
+
+def run_install():
+    info("Starting installation...")
+    print()
+
+    check_python_version()
+    find_target_git_root()     # ← discovers TARGET_GIT_ROOT, GIT_HOOKS_DIR, HOOK_DEST
+    check_git_hooks_dir()
+    create_virtual_environment()
+    install_dependencies()
+    install_hook()
+    validate_installation()
+
+    print()
+    print("  ══════════════════════════════════════════════")
+    ok("Installation complete!")
+    info("Secure-Commit will now run automatically on every 'git commit'.")
+    print("  ══════════════════════════════════════════════")
+    print()
+
+
+def run_uninstall():
+    find_target_git_root()     # need TARGET_GIT_ROOT to know where HOOK_DEST is
+    uninstall()
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -350,28 +384,9 @@ def main():
     print()
 
     if args.uninstall:
-        find_target_git_root()     # need TARGET_GIT_ROOT to know where HOOK_DEST is
-        uninstall()
-        return
-
-    info("Starting installation...")
-    print()
-
-    check_python_version()
-    find_target_git_root()     # ← discovers TARGET_GIT_ROOT, GIT_HOOKS_DIR, HOOK_DEST
-    check_git_hooks_dir()
-    create_virtual_environment()
-    install_dependencies()
-    install_hook()
-    validate_installation()
-
-    print()
-    print("  ══════════════════════════════════════════════")
-    ok("Installation complete!")
-    info("Secure-Commit will now run automatically on every 'git commit'.")
-    print("  ══════════════════════════════════════════════")
-    print()
-
+        run_uninstall()
+    else:
+        run_install()
 
 if __name__ == "__main__":
     main()

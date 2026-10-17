@@ -69,7 +69,7 @@ def run_policy_engine(parsed, policies):
 
     Args:
         parsed   (dict): Output from iac_parser.parse_file() — contains
-                         file_type, file_path, parsed_data.
+                         file_type, file_path, parsed_data, skip_all, suppressed_rules.
         policies (dict): Loaded policy rulebook from load_policies().
 
     Returns:
@@ -80,7 +80,12 @@ def run_policy_engine(parsed, policies):
     file_type   = parsed.get("file_type", "")
     file_path   = parsed.get("file_path", "unknown")
     parsed_data = parsed.get("parsed_data", {})
+    skip_all    = parsed.get("skip_all", False)
+    suppressed  = parsed.get("suppressed_rules", set())
     findings    = []
+
+    if skip_all:
+        return []
 
     # ── Smart Routing ─────────────────────────────────────────────────────
     if file_type == "dockerfile":
@@ -103,6 +108,9 @@ def run_policy_engine(parsed, policies):
     }
 
     for rule in rules:
+        if rule.get("id", "").upper() in suppressed:
+            continue
+
         check_type = rule.get("check_type")
         evaluator  = evaluators.get(check_type)
 
@@ -228,36 +236,42 @@ def _eval_cidr_check(data, rule, file_path):
     resources       = _get_resources(data, resource_type)
 
     for res_name, res_body in resources.items():
-        # ingress/egress may be a nested dict
+        # ingress/egress may be a nested dict or list of dicts
         for direction in ("ingress", "egress"):
-            rule_block = res_body.get(direction, {})
-            if not isinstance(rule_block, dict):
+            rule_blocks = res_body.get(direction, [])
+            if isinstance(rule_blocks, dict):
+                rule_blocks = [rule_blocks]
+            elif not isinstance(rule_blocks, list):
                 continue
 
-            cidr_blocks  = rule_block.get("cidr_blocks", [])
-            from_port    = int(rule_block.get("from_port", -1))
-            to_port      = int(rule_block.get("to_port", from_port))
+            for rule_block in rule_blocks:
+                if not isinstance(rule_block, dict):
+                    continue
 
-            if not isinstance(cidr_blocks, list):
-                cidr_blocks = [cidr_blocks]
+                cidr_blocks  = rule_block.get("cidr_blocks", [])
+                from_port    = int(rule_block.get("from_port", -1))
+                to_port      = int(rule_block.get("to_port", from_port))
 
-            for cidr in cidr_blocks:
-                if cidr in forbidden_cidrs:
-                    # Check if any sensitive port falls in the range.
-                    # Special case: port 0 in the policy means the rule targets
-                    # "all-ports-open" configs (from_port=0, to_port=0, protocol=-1).
-                    # It should only fire when the FILE itself has from_port=0 AND to_port=0.
-                    for port in sensitive_ports:
-                        if port == 0:
-                            # Only flag if the file actually opens all ports (0-0)
-                            if from_port == 0 and to_port == 0:
+                if not isinstance(cidr_blocks, list):
+                    cidr_blocks = [cidr_blocks]
+
+                for cidr in cidr_blocks:
+                    if cidr in forbidden_cidrs:
+                        # Check if any sensitive port falls in the range.
+                        # Special case: port 0 in the policy means the rule targets
+                        # "all-ports-open" configs (from_port=0, to_port=0, protocol=-1).
+                        # It should only fire when the FILE itself has from_port=0 AND to_port=0.
+                        for port in sensitive_ports:
+                            if port == 0:
+                                # Only flag if the file actually opens all ports (0-0)
+                                if from_port == 0 and to_port == 0:
+                                    return _make_finding(rule, file_path,
+                                        f"{direction} allows '{cidr}' on port {port} "
+                                        f"(resource: {resource_type}.{res_name})")
+                            elif from_port <= port <= to_port:
                                 return _make_finding(rule, file_path,
                                     f"{direction} allows '{cidr}' on port {port} "
                                     f"(resource: {resource_type}.{res_name})")
-                        elif from_port <= port <= to_port:
-                            return _make_finding(rule, file_path,
-                                f"{direction} allows '{cidr}' on port {port} "
-                                f"(resource: {resource_type}.{res_name})")
     return None
 
 

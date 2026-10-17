@@ -1,0 +1,17 @@
+- id: secure-commit
+  name: Secure-Commit Scanner
+  description: Offline, Zero-Trust IaC and Secret scanning engine.
+  entry: secure-commit scan
+  language: python
+  types_or: [text]
+  exclude: >
+    (?x)^(
+        .*\.png$|
+        .*\.jpg$|
+        .*\.jpeg$|
+        .*\.pdf$|
+        .*\.zip$|
+        package-lock\.json$|
+        poetry\.lock$|
+        go\.sum$
+    )$

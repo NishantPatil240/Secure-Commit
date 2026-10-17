@@ -19,25 +19,26 @@ import re
 import math
 from pathlib import Path
 
+from engine.utils import should_skip_file
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  FILE EXTENSIONS TO SKIP  (binary / non-scannable)
-# ─────────────────────────────────────────────────────────────────────────────
 
-_BINARY_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg",
-    ".pdf", ".zip", ".tar", ".gz", ".7z", ".rar",
-    ".exe", ".dll", ".so", ".dylib", ".bin", ".whl",
-    ".pyc", ".pyo", ".class",
-    ".lock",          # poetry.lock, package-lock.json
-    ".sum",           # go.sum
-}
+
 
 # Variable names that produce common false positives for the entropy check
 _ENTROPY_SAFE_NAMES = re.compile(
     r"(?i)(hash|checksum|uuid|md5|sha\d*|digest|fingerprint|nonce|salt)",
     re.IGNORECASE,
 )
+
+_PATTERN_CACHE = {}
+
+def _get_compiled_pattern(regex_str):
+    if regex_str not in _PATTERN_CACHE:
+        try:
+            _PATTERN_CACHE[regex_str] = re.compile(regex_str, re.IGNORECASE)
+        except re.error:
+            _PATTERN_CACHE[regex_str] = None
+    return _PATTERN_CACHE[regex_str]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,7 +76,7 @@ def scan_staged_files(repo, policy_patterns):
                 continue   # Deleted file — nothing to scan
 
             file_path = diff_item.a_path
-            if _should_skip(file_path):
+            if should_skip_file(file_path):
                 continue
 
             try:
@@ -131,7 +132,7 @@ def scan_commit_history(repo, policy_patterns, depth=50):
                 continue
 
             file_path = diff_item.b_path
-            if _should_skip(file_path):
+            if should_skip_file(file_path):
                 continue
 
             try:
@@ -191,8 +192,23 @@ def scan_text(text, filename, policy_patterns):
         if not stripped:
             continue
 
+        # ── Inline Suppression (# nosec) ──────────────────────────────────
+        skip_all = False
+        suppressed_rules = set()
+        nosec_match = re.search(r'#\s*nosec\b(.*)', line, re.IGNORECASE)
+        if nosec_match:
+            rest = nosec_match.group(1).strip()
+            if not rest:
+                skip_all = True
+            else:
+                suppressed_rules = {r.strip().upper() for r in rest.split()}
+
         # ── Method A: Regex DFA pattern matching ──────────────────────────
         for pattern_rule in policy_patterns:
+            rule_id = pattern_rule.get("id", "SEC-???").upper()
+            if skip_all or rule_id in suppressed_rules:
+                continue
+
             # Skip entropy-only rules here (handled below)
             if pattern_rule.get("check_type") == "entropy":
                 continue
@@ -201,11 +217,10 @@ def scan_text(text, filename, policy_patterns):
             if not regex_str:
                 continue
 
-            try:
-                compiled = re.compile(regex_str, re.IGNORECASE)
-                match    = compiled.search(stripped)
-            except re.error:
+            compiled = _get_compiled_pattern(regex_str)
+            if not compiled:
                 continue   # Malformed regex in YAML — skip
+            match = compiled.search(stripped)
 
             if match:
                 matched_val = match.group(0)
@@ -232,6 +247,9 @@ def scan_text(text, filename, policy_patterns):
                 })
 
         # ── Method B: Shannon entropy check ───────────────────────────────
+        if skip_all or "SEC-010" in suppressed_rules:
+            continue
+
         # Find all long token-like strings in this line
         tokens = re.findall(r"['\"]([A-Za-z0-9+/=_\-]{20,})['\"]", stripped)
         for token in tokens:
@@ -297,14 +315,7 @@ def _shannon_entropy(string):
     return entropy
 
 
-def _should_skip(file_path):
-    """
-    Return True if the file should be excluded from scanning.
 
-    Skips binary files, lock files, and image files based on extension.
-    """
-    ext = Path(file_path).suffix.lower()
-    return ext in _BINARY_EXTENSIONS
 
 
 def _mask_secret(value):
