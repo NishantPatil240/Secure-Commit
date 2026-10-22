@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from engine.secret_scanner import scan_text, _shannon_entropy, _mask_secret, _should_skip
+from engine.utils          import should_skip_file
 from engine.policy_engine  import load_policies
 
 FIXTURES    = Path(__file__).parent / "fixtures"

@@ -23,9 +23,8 @@ dependencies = [
 secure-commit = "cli:main"
 
 [tool.setuptools]
-# Tells the bundler to include the engine folder and cli.py
 py-modules = ["cli", "install"]
-packages = ["engine"]
 
 [tool.setuptools.packages.find]
+include = ["engine*"]
 exclude = ["tests*", "docs*"]

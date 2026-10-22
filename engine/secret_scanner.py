@@ -21,6 +21,10 @@ from pathlib import Path
 
 from engine.utils import should_skip_file
 
+# Backward compatibility alias
+_should_skip = should_skip_file
+
+
 
 
 

@@ -1,0 +1,60 @@
+Metadata-Version: 2.4
+Name: secure-commit
+Version: 1.1.0
+Summary: Zero-Trust, Metadata-Only IaC and Secret scanning engine.
+Author-email: Developer <developer@example.com>
+License: MIT
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: gitpython
+Requires-Dist: pyyaml
+
+# Secure-Commit
+
+**Secure-Commit** is a deterministic, offline-first Git pre-commit hook engine and CLI scanner. It intercepts the developer's commit workflow *before* any code leaves the local machine, applying two classes of checks simultaneously:
+
+1. **Secret Detection** — Regex/DFA-based and Shannon entropy scanning of staged files and Git history for leaked credentials.
+2. **IaC Policy Enforcement** — YAML-driven policy engine that parses Terraform (`.tf`) and Dockerfiles against CIS/OWASP/AWS Well-Architected rules.
+
+## Installation
+
+Run the one-time setup script from inside your Git repository:
+
+```bash
+python install.py
+```
+
+This will create a `.venv`, install dependencies, and automatically wire the hook to your `.git/hooks/pre-commit`.
+
+To uninstall the hook:
+
+```bash
+python install.py --uninstall
+```
+
+## Features
+
+- **Zero Network Calls:** Completely offline. No Trivy/Snyk DB downloads.
+- **Git History Scan:** Detects "ghost secrets" hidden in your last 50 commits.
+- **YAML Policy Engine:** All rules are defined in `config/policy.yaml`. No code changes needed to add new rules.
+- **Cross-Platform:** Works on Windows (Git Bash/CMD), Linux, and macOS.
+
+## Adding Rule Exceptions
+
+If you encounter a false positive, you can suppress secret detection on a specific line by adding a comment with `# nosec`.
+
+```python
+# Suppress all secret findings on this line
+dummy_password = "test_password_123" # nosec
+
+# Suppress a specific rule ID
+fake_key = "AKIAIOSFODNN7EXAMPLE" # nosec SEC-001
+```
+
+## Available Policies
+
+By default, Secure-Commit enforces 25 rules based on OWASP Top 10, CIS Benchmarks, and AWS Well-Architected Framework:
+
+- **Docker:** Blocks `root` user, exposed port 22, `:latest` tags, privileged mode, and secrets in `ENV` or `COPY`.
+- **Terraform/AWS:** Blocks public S3 buckets, open SSH (0.0.0.0/0), unencrypted RDS/EBS, and IAM wildcard admin policies.
+- **Secrets:** Blocks AWS keys, Stripe tokens, GitHub PATs, private keys, Google Cloud API keys, Slack tokens, and high-entropy random strings.
